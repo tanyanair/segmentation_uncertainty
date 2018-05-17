@@ -1,0 +1,29 @@
+{
+	"model": {
+		"nb_ch": 4,
+		"nb_kers": 32,
+		"nb_mc": 10,
+		"wd": 0.00001,
+		"dr": 0.5,
+		"optimizer": "adam",
+		"lr": 0.0002,
+		"lr_decay": 0.995,
+		"loss_fn": "weighted_xentropy",
+		"depth": 4
+	},
+	"expt": {
+		"data_path": "/cim/data/mslaq2.tfrecord",
+		"restore_path": "/cim/tnair/repos/tf_unet/output/bunet/tfr/all_modality/lessdr/4drlayers/fixstats/exp2_32kers_lr0.0002decay0.995dice_and_xe_cw800-2schedule0.86_wd0.00005_dr0.5",
+		"steps_per_epoch": 300,
+		"nb_val_steps": 85,
+		"nb_epochs": 200,
+		"batch_size": 3,
+		"cw": {
+			"start": 3,
+			"stop": 3,
+			"decay": 1 
+		},
+		"viz": 1,
+		"shuffle": 1
+	}
+}
