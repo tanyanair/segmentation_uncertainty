@@ -26,6 +26,6 @@ def prd_variance(log_var_mcs):
     return np.mean(np.exp(np.clip(log_var_mcs, -7, 7)), 0)  # (nb_mc, 192, 192, 64) --> (1, 192, 192, 64)
 
 
-def prd_uncertainty(mu_mcs, prd_var):
-    # = Var(mu_mcs) + prd_var
-    return np.mean(np.square(mu_mcs), 0) - np.square(np.mean(mu_mcs, 0)) + prd_var
+def prd_uncertainty(mu_mcs):
+    # = np.var(mu_mcs, 0)
+    return np.mean(np.square(mu_mcs), 0) - np.square(np.mean(mu_mcs, 0))

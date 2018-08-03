@@ -2,69 +2,38 @@ import os
 import logging
 
 import tensorflow as tf
-from tf_unet.callbacks import CSVCallback, PlotCallback, ValidationLoss, AllUncertaintyVisualizer
+from bunet.training.callbacks import CSVCallback, PlotCallback, ValidationLoss, AllUncertaintyVisualizer
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
 EPSILON = 1e-5
 
 
 class Trainer(object):
-    """
-    Trains a unet instance
-    :param net: the bunet instance to train
-    :param norm_grads: (optional) true if normalized gradients should be added to the summaries
-    :param optimizer: (optional) name of the optimizer to use (momentum or adam)
-    :param opt_kwargs: (optional) kwargs passed to the learning rate (momentum opt) and to the optimizer
-    """
-
-    def __init__(self, net, norm_grads=False, optimizer="momentum", opt_kwargs={}, wd=0., batch_size=2):
+    def __init__(self, net, opt_kwargs={}, wd=0., batch_size=2):
+        """
+        Trains a BUNet instance
+        :param net: the bunet instance to train
+        :param dict opt_kwargs: kwargs passed to optimizer (lr and decay)
+        :param float wd: L2 weight decay parameter
+        :param int batch_size: batch size
+        """
         self.net = net
-        self.norm_grads = norm_grads
-        self.optimizer = optimizer
         self.opt_kwargs = opt_kwargs
         self.wd = wd
         self.batch_size = batch_size
 
     def _get_optimizer(self, training_iters, global_step):
-        if self.optimizer == "momentum":
-            learning_rate = self.opt_kwargs.pop("lr", 0.2)
-            decay_rate = self.opt_kwargs.pop("decay", 0.95)
-            momentum = self.opt_kwargs.pop("momentum", 0.2)
-            self.learning_rate_node = tf.train.exponential_decay(learning_rate=learning_rate,
-                                                                 global_step=global_step,
-                                                                 decay_steps=training_iters,
-                                                                 decay_rate=decay_rate,
-                                                                 staircase=True)
-            optimizer = tf.train.MomentumOptimizer(learning_rate=self.learning_rate_node, momentum=momentum,
-                                                   **self.opt_kwargs).minimize(self.net.loss,
-                                                                               global_step=global_step)
-        elif self.optimizer == "adam":
-            learning_rate = self.opt_kwargs.pop("lr", 0.001)
-            decay_rate = self.opt_kwargs.pop("decay", 0.95)
-            self.learning_rate_node = tf.train.exponential_decay(learning_rate=learning_rate,
-                                                                 global_step=global_step,
-                                                                 decay_steps=training_iters,
-                                                                 decay_rate=decay_rate,
-                                                                 staircase=True)
-            optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate_node,
-                                               **self.opt_kwargs).minimize(self.net.loss,
-                                                                           global_step=global_step)
-        else:
-            raise ValueError('optimizer must be `adam` or `momentum`, you passed: `{}`'.format(self.optimizer))
-
+        learning_rate = self.opt_kwargs.pop("lr", 0.001)
+        decay_rate = self.opt_kwargs.pop("decay", 0.95)
+        self.learning_rate_node = tf.train.exponential_decay(learning_rate=learning_rate,
+                                                             global_step=global_step,
+                                                             decay_steps=training_iters,
+                                                             decay_rate=decay_rate,
+                                                             staircase=True)
+        optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate_node,
+                                           **self.opt_kwargs).minimize(self.net.loss,
+                                                                       global_step=global_step)
         return optimizer
-
-    def _initialize(self, training_iters):
-        global_step = tf.Variable(0, trainable=False)
-        self.optimizer = self._get_optimizer(training_iters, global_step)
-        init_g = tf.global_variables_initializer()
-        init_l = tf.local_variables_initializer()
-
-        config = tf.ConfigProto(
-            gpu_options=tf.GPUOptions(allow_growth=True, force_gpu_compatible=False),
-            allow_soft_placement=True)
-
-        return init_g, init_l, config
 
     def train(self, train_gen, val_gen, nb_val_steps, output_path, steps_per_epoch=10, epochs=100, dropout=None,
               restore_path="", write_graph=False, viz=True, cca_thresh=0.5, class_weight=None):
@@ -72,15 +41,22 @@ class Trainer(object):
         Launches training process
         """
         save_path = os.path.join(output_path, "model.cpkt")
-        init_g, init_l, config = self._initialize(steps_per_epoch)
+        # initialize variables
+        global_step = tf.Variable(0, trainable=False)
+        self.optimizer = self._get_optimizer(steps_per_epoch, global_step)
+        init_global = tf.global_variables_initializer()
+        init_local = tf.local_variables_initializer()
+        config = tf.ConfigProto(
+            gpu_options=tf.GPUOptions(allow_growth=True, force_gpu_compatible=False),
+            allow_soft_placement=True)
         x_train, y_train = train_gen.get_next()
 
         with tf.Session(config=config) as sess:
             if write_graph:
                 tf.train.write_graph(sess.graph_def, output_path, "graph.pb", False)
 
-            sess.run(init_g)
-            sess.run(init_l)
+            sess.run(init_global)
+            sess.run(init_local)
             sess.run(train_gen.initializer)
             sess.run(val_gen.initializer)
 
@@ -104,9 +80,6 @@ class Trainer(object):
                 total_dice = 0
                 for step in range((epoch * steps_per_epoch), ((epoch + 1) * steps_per_epoch)):
                     batch_x, batch_y = sess.run([x_train, y_train])
-                    logging.debug(
-                        'batch_x.shape {}  batch_y.shape {}  dropout {}'.format(batch_x.shape, batch_y.shape, dropout))
-                    # Run optimization
                     _, loss, dce, prd_min, prd_max, lr, gradients = sess.run((self.optimizer,
                                                                               self.net.loss,
                                                                               self.net.dice,
@@ -150,16 +123,9 @@ class Trainer(object):
             coord.join(threads)
             logging.info("Optimization Finished!")
 
-            return save_path
-
     @staticmethod
     def output_epoch_stats(epoch, train_stats):
         logging.info("Epoch {}, Average loss: {:.8f},   Average dice: {:.8f},   learning rate: {:.8f},  "
                      "prd_min: {:.6f}, prd_max: {:.6f}".
                      format(epoch, train_stats['train_loss'], train_stats['train_dice'], train_stats['lr'],
                             train_stats['prd_min'], train_stats['prd_max']))
-
-    @staticmethod
-    def output_minibatch_stats(step, loss, dce):
-        logging.info("Iter {}, Minibatch Loss= {:.8f}, Minibatch Dice= {:.8f}".format(step, loss, dce))
-

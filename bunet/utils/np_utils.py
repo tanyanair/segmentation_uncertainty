@@ -1,7 +1,7 @@
 import numpy as np
 
-_MIN_CLIP = -6
-_MAX_CLIP = 6
+_MIN_CLIP = -7
+_MAX_CLIP = 7
 
 
 def sigmoid(x):

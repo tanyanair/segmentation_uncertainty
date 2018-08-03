@@ -1,6 +1,6 @@
-from tf_unet.data.tfr_data_provider import BrainVolumeDataProvider as DataProvider
-from tf_unet.models.bunet import BUnet
-from tf_unet.training.train_tfr import Trainer
+from bunet.data.tfr_data_provider import BrainVolumeDataProvider as DataProvider
+from bunet.models.bunet import BUnet
+from bunet.training.train_tfr import Trainer
 from argparse import ArgumentParser
 from shutil import copy
 import json
@@ -21,7 +21,6 @@ def main(args):
                 nb_mc=model_cfg['nb_mc'],
                 depth=model_cfg['depth'],
                 weight_decay=model_cfg['wd'],
-                loss_fn=model_cfg['loss_fn'],
                 batch_size=expt_cfg['batch_size'])
 
     train_ds = DataProvider(expt_cfg['data_path'],
@@ -31,11 +30,10 @@ def main(args):
     valid_gen = valid_ds.get_generator(expt_cfg['batch_size'], expt_cfg['nb_epochs'])
 
     trainer = Trainer(net,
-                      optimizer=model_cfg['optimizer'],
                       opt_kwargs={'lr': model_cfg['lr'], 'decay': model_cfg['lr_decay']},
                       batch_size=expt_cfg['batch_size'])
 
-    path = trainer.train(train_gen,
+    trainer.train(train_gen,
                          valid_gen,
                          nb_val_steps=expt_cfg['nb_val_steps'],
                          output_path=out_dir,

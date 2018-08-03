@@ -1,12 +1,11 @@
-from abc import abstractmethod
 import numpy as np
 import tensorflow as tf
 
 _SEED = 5
+_BUFFER_SIZE = 1350
 
 
 class BrainDataProvider:
-
     def __init__(self, tfrecord_path, config):
         """
         Data provider for multimodal brain MRI.
@@ -18,26 +17,24 @@ class BrainDataProvider:
         self._mode = config.get('mode')
         self._shuffle = config.get('shuffle', True)
         self._augment = config.get('augment', False)
-        self._subjects = np.load(config.get('mslaq_subj_list', '/usr/local/data/tnair/thesis/data/mslaq/mslaq_subj_list.npy'))
-        self._subjects = [i[4:] for i in self._subjects]
-        self._nb_folds = config.get('nb-folds', 10)
+        self._subjects = np.load(config.get('subj_list', '/path/to/subjects/list_in_npy_format.npy'))
 
-        fold_length = len(self._subjects) // self._nb_folds
-        self._subjects = self._rotate(self._subjects, config.get('fold', 0) * fold_length)
-        train_idx = (self._nb_folds - 2) * fold_length
-        valid_idx = (self._nb_folds - 1) * fold_length
+        # get the unique integer subject identifier from the subject string
+        self._subjects = [i[4:] for i in self._subjects]
+
+        nb_train = round(len(self._subjects) * 0.8)
+        nb_valid = round(len(self._subjects) * 0.1)
         if self._mode == 'train':
-            self._subjects = self._subjects[:train_idx]
+            self._subjects = self._subjects[:nb_train]
         elif self._mode == 'valid':
-            self._subjects = self._subjects[train_idx:valid_idx]
+            self._subjects = self._subjects[nb_train:nb_train+nb_valid]
         elif self._mode == 'test':
-            self._subjects = self._subjects[valid_idx:]
+            self._subjects = self._subjects[nb_train+nb_valid:]
         self._subjects = tf.constant(np.asarray(self._subjects, np.int32))
 
-    def __len__(self):
-        return len(self._subjects)
 
-    def _parse_tfrecord(self, tfrecord):
+    @staticmethod
+    def _parse_tfrecord(tfrecord):
         features = tf.parse_single_example(tfrecord,
                                            features={'img': tf.FixedLenFeature([], tf.string),
                                                      'label': tf.FixedLenFeature([], tf.string),
@@ -49,15 +46,10 @@ class BrainDataProvider:
     @staticmethod
     def _process_data(x):
         x = tf.transpose(x, [3, 2, 1, 0])  # (bs, z, y, x, modality)
-        x = x[12:204, 12:204, :, :]
-        # x = tf.clip_by_value(x, 0., 1.)
+        x = x[12:204, 12:204, :, :] # crop out the background voxels
         x = tf.pad(x, paddings=tf.constant([[0, 0], [0, 0], [2, 2], [0, 0]]),
                    mode='CONSTANT', constant_values=0)
         return x
-
-    @staticmethod
-    def _rotate(l, n):
-        return l[-n:] + l[:-n]
 
     def _subj_filter(self, subj, tp, img, label):
         return tf.reduce_any(tf.equal(subj, self._subjects))
@@ -65,10 +57,10 @@ class BrainDataProvider:
     def _remove_subj_tp(self, subj, tp, img, label):
         img = tf.decode_raw(img, tf.float32)
         label = tf.cast(tf.decode_raw(label, tf.int16), tf.float32)
+        # hard coded shape because the images are a fixed size
         img = tf.reshape(img, tf.stack([4, 60, 256, 256]))
         label = tf.reshape(label, tf.stack([1, 60, 256, 256]))
-        # label = tf.expand_dims(tf.reshape(label, tf.stack([60, 256, 256])), 0)
-        img = self._process_data(img)  # [..., :-1]
+        img = self._process_data(img)
         label = self._process_data(label)
         return img, label
 
@@ -89,7 +81,7 @@ class BrainVolumeDataProvider(BrainDataProvider):
         dataset = dataset.filter(self._subj_filter)
         dataset = dataset.map(self._remove_subj_tp, num_parallel_calls=10)
         if self._shuffle:
-            dataset = dataset.shuffle(buffer_size=1350, seed=_SEED)
+            dataset = dataset.shuffle(buffer_size=_BUFFER_SIZE, seed=_SEED)
         dataset = dataset.repeat(nb_epochs)
         dataset = dataset.batch(batch_size)
         dataset = dataset.prefetch(50)
