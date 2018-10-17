@@ -19,7 +19,6 @@ def main(args):
     net = BUnet(nb_ch=model_cfg['nb_ch'],
                 nb_kers=model_cfg['nb_kers'],
                 nb_mc=model_cfg['nb_mc'],
-                depth=model_cfg['depth'],
                 weight_decay=model_cfg['wd'],
                 batch_size=expt_cfg['batch_size'])
 
